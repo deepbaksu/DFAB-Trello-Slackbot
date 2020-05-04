@@ -1,12 +1,14 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/adlio/trello"
+	"github.com/dl4ab/DFAB-Trello-Slackbot/timeutil"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -16,11 +18,22 @@ func getPreviousTime(t time.Duration) time.Time {
 	return now.Add(-t)
 }
 
+var startTimeInDurationString = flag.String("start", "1d", "Start time to search (e.g., 1d means search events from 1 day ago)")
+
 func main() {
+  flag.Parse()
+
 	appKey := os.Getenv("TRELLO_APP_KEY")
 	token := os.Getenv("TRELLO_TOKEN")
 	boardId := os.Getenv("TRELLO_BOARD_ID")
 	username := os.Getenv("TRELLO_USERNAME")
+
+	startTimeInDuration, err := timeutil.ParseDuration(*startTimeInDurationString)
+	if err != nil {
+		log.WithError(err).Fatal("Failed to parse duration string")
+	}
+  startDate := getPreviousTime(startTimeInDuration)
+  log.Infof("Checking activities since %v", startDate.Local().Format(time.UnixDate))
 
 	client := trello.NewClient(appKey, token)
 
@@ -43,7 +56,7 @@ func main() {
 			continue
 		}
 		for _, card := range cards {
-			if card.DateLastActivity.After(getPreviousTime(time.Hour * 24)) {
+			if card.DateLastActivity.After(startDate) {
 				member, err := card.CreatorMember()
 				if err != nil {
 					log.WithError(err).Warn("card.CreatorMember() failed")
