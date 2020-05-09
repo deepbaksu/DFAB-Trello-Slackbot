@@ -8,3 +8,7 @@ help:
 .PHONY: run
 run: ## Run the command line with a default config
 	go run main.go
+
+.PHONY: test
+test: ## Test the command
+	go test -v ./...

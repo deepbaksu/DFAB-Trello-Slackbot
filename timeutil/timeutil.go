@@ -41,3 +41,13 @@ func ParseDuration(x string) (time.Duration, error) {
 
 	return suffixDuration * time.Duration(num), nil
 }
+
+func GetPreviousTime(t time.Duration) time.Time {
+	now := time.Now()
+	return now.Add(-t)
+}
+
+func GetBeginningOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+
