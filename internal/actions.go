@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/adlio/trello"
 	"github.com/dl4ab/DFAB-Trello-Slackbot/trelloutils"
@@ -12,7 +13,31 @@ import (
 
 type InterestedActions map[string]map[string]*trello.Action
 
-func (app *App) GetInterestedActions() InterestedActions {
+type CardInfo struct {
+	id        string
+	updatedAt time.Time
+	content   string
+	listName  string
+}
+
+func CardInfoFromAction(action *trello.Action) (*CardInfo, error) {
+	listName, err := trelloutils.GetListNameFromAction(action)
+	if err != nil {
+		return nil, err
+	}
+	return &CardInfo{
+		id:        action.Data.Card.ID,
+		updatedAt: action.Date,
+		content:   action.Data.Card.Name,
+		listName:  listName,
+	}, nil
+}
+
+// 1. collect all the interesting cards
+//    card_id => (action_time, card_content, list_name)
+// 2. get all list names and build a map (list_name => card[])
+// 3. for each list, print cards
+func (app *App) GetInterestedActions() map[string]*CardInfo {
 	trelloBoard, err := app.trelloClient.GetBoard(app.boardId, trello.Defaults())
 	if err != nil {
 		log.WithField("err", err).Fatalf("client.GetBoard(%v) has failed", app.boardId)
@@ -20,17 +45,10 @@ func (app *App) GetInterestedActions() InterestedActions {
 
 	actions, _ := trelloBoard.GetActions(trello.Defaults())
 
-	// ListName => CardID => Action
-	// So that we can get the latest card information.
-	interestedActions := make(map[string]map[string]*trello.Action)
+	interestedCards := make(map[string]*CardInfo)
 
 	for _, action := range actions {
 		if action.Date.After(app.startDate) && trelloutils.GetMemberFromAction(action) == app.username {
-			listName, err := trelloutils.GetListNameFromAction(action)
-			if err != nil {
-				log.WithError(err).Warn("Skipping unknown list name")
-				continue
-			}
 			if action.Data.Card == nil {
 				log.WithFields(
 					log.Fields{
@@ -42,41 +60,68 @@ func (app *App) GetInterestedActions() InterestedActions {
 				continue
 			}
 
-			if _, ok := interestedActions[listName]; !ok {
-				interestedActions[listName] = make(map[string]*trello.Action)
+			newCardInfo, err := CardInfoFromAction(action)
+			if err != nil {
+				log.WithError(err).Warn("CardInfoFromAction has failed")
+				continue
 			}
 
-			actionData, ok := interestedActions[listName][action.Data.Card.ID]
+			existingCardInfo, ok := interestedCards[newCardInfo.id]
+
 			if !ok {
-				interestedActions[listName][action.Data.Card.ID] = action
-			} else if actionData.Date.Before(action.Date) {
-				interestedActions[listName][action.Data.Card.ID] = action
+				// not found
+				interestedCards[newCardInfo.id] = newCardInfo
+				continue
+			}
+
+			if existingCardInfo.updatedAt.Before(newCardInfo.updatedAt) {
+				interestedCards[newCardInfo.id] = newCardInfo
 			}
 		}
 	}
 
-	return interestedActions
+	return interestedCards
 }
 
-func printActions(interestedActions InterestedActions) {
+func printActions(interestedCards map[string]*CardInfo) {
 	// Try to get sorted list names so that it can print in a correct order.
 	var listNames []string
-	for listName, _ := range interestedActions {
-		listNames = append(listNames, listName)
+
+	listNameToCardInfo := make(map[string][]string)
+
+	for _, cardInfo := range interestedCards {
+		listNames = append(listNames, cardInfo.listName)
+
+		lists, ok := listNameToCardInfo[cardInfo.listName]
+		if !ok {
+			lists = make([]string, 0)
+		}
+		listNameToCardInfo[cardInfo.listName] = append(lists, cardInfo.content)
 	}
 
 	sort.Strings(listNames)
 
+  prevListName := ""
+
 	for _, listName := range listNames {
+    if prevListName == listName {
+      // this list is already printed.
+      continue
+    }
 		fmt.Println(listName)
 		fmt.Println(strings.Repeat("=", len(listName)))
 
 		var cards []string
-		for _, action := range interestedActions[listName] {
-			cards = append(cards, action.Data.Card.Name)
+
+		for _, cardContent := range listNameToCardInfo[listName] {
+			cards = append(cards, cardContent)
 		}
 
 		trelloutils.PrintCards(cards)
+    // Add an extra line between lists.
 		fmt.Println()
+
+    // track the list name so we don't print the same list multiple times.
+    prevListName = listName
 	}
 }

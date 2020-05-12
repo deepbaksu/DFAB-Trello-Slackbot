@@ -16,6 +16,7 @@ var startTimeInDurationString = flag.String("start", "1d", "Start time to search
 func main() {
 	flag.Parse()
 
+
 	appKey := os.Getenv("TRELLO_APP_KEY")
 	token := os.Getenv("TRELLO_TOKEN")
 	boardId := os.Getenv("TRELLO_BOARD_ID")
